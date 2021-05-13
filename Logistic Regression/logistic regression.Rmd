@@ -1,0 +1,178 @@
+
+# HEALTH CARE QUALITY
+```{r}
+library(caTools)
+df_orig <- read.csv("healthcarequality.csv")
+
+prop.table(table(df_orig$PoorCare))
+# 75% of patients receive poor care
+
+# split into training & test
+set.seed(88)
+isTrain <- sample.split(df_orig$PoorCare, SplitRatio = 0.75)
+
+df_train <- df_orig[isTrain,]
+df_test <- df_orig[!isTrain,]
+
+nrow(df_train)
+nrow(df_test)
+```
+```{r}
+model <- glm(PoorCare ~ OfficeVisits + Narcotics, data=df_train, family = binomial)
+summary(model)
+
+predicted_train <- predict(model, type="response") 
+
+# Group by PoorCare, summarize Mean of predictions
+tapply(predicted_train, df_train$PoorCare, mean)
+#   output:
+#         0         1 
+# 0.1894512 0.4392246 
+# PoorCare probabilities have a mean of 0.44
+# Good quality probabilities have a mean of 0.19
+
+# Confusion Matrix
+confusion_matrix <- table(df_train$PoorCare, predicted_train > 0.7)
+TN <- confusion_matrix["0", "FALSE"]
+TP <- confusion_matrix["1", "TRUE"]
+FN <- confusion_matrix["1", "FALSE"]
+FP <- confusion_matrix["0", "TRUE"]
+
+TNR <- TN/(TN + FP)
+TPR <- TP/(TP + FN)
+```
+
+```{r}
+install.packages("ROCR")
+library(ROCR)
+
+# ROCR
+rocrData <- prediction(predicted_train, df_train$PoorCare)
+rocrCurve <- performance(rocrData, "tpr", "fpr")
+plot(rocrCurve, colorize = TRUE, print.cutoffs.at=seq(0, 1, 0.1), text.adj=c(-0.2, 1.7))
+
+# AUC
+rocrAUC <- performance(rocrData, "auc")
+rocrAUC@y.values[[1]]
+```
+
+```{r}
+predicted_test <- predict(model, type="response", newdata = df_test)
+
+rocrData <- prediction(predicted_test, df_test$PoorCare)
+rocrCurve <- performance(rocrData, "tpr", "fpr")
+plot(rocrCurve, colorize = TRUE, print.cutoffs.at = seq(0,1,0.1), text.adj=c(-0.2, 1.7))
+
+rocrAUC <- performance(rocrData, "auc")@y.values[[1]]
+rocrAUC
+```
+
+# FRAMINGHAM HEART STUDY
+```{r}
+library(dplyr)
+df_orig <- read.csv("framingham.csv") %>% na.omit()
+glimpse(df_orig)
+
+# SPLIT data into training and testing
+library(caTools)
+set.seed(1000)
+bool_train <- sample.split(df_orig$TenYearCHD, .65)
+df_train <- df_orig[bool_train,]
+df_test <- df_orig[!bool_train,]
+
+prop.table(table(df_orig$TenYearCHD))
+prop.table(table(df_train$TenYearCHD))
+prop.table(table(df_test$TenYearCHD))
+
+# LOGISTIC REGRESSION to predict CHD
+model <- glm(TenYearCHD ~ ., data = df_orig, family = binomial)
+summary(model)
+
+# EVALUATE predictive power on test data
+predicted_test <- predict(model, newdata = df_test, type="response")
+
+table(df_test$TenYearCHD, predicted_test > 0.5)
+
+library(ROCR)
+rocrData <- prediction(predicted_test, df_test$TenYearCHD)
+rocrAUC <- performance(rocrData, "auc")@y.values[[1]]
+```
+
+
+# POLLING DATA
+```{r}
+df_polling.orig <- read.csv("PollingData.csv")
+str(df_polling.orig)
+# Variables
+#   Republican : 1 if Republican won, 0 if Democratic won
+#   Rasmussen  : Poll survey Republican% - Democratic%
+#   DiffCount  : Republican polls - Democratic polls
+#   PropR      : Republican polls / All polls
+
+library(dplyr)
+library(mice)
+
+# IMPUTE MISSING VALUES
+set.seed(144)
+df_impute <- df_polling.orig %>% 
+              select(Rasmussen, SurveyUSA, PropR, DiffCount) %>% 
+              mice() %>% complete()
+# mice() Output shows that 5 iterations of imputation have been run and all variables have been filled in 
+
+df_polling <- df_polling.orig
+df_polling[,c("Rasmussen", "SurveyUSA", "PropR", "DiffCount")] <- df_impute
+
+# SPLIT TRAIN AND TEST
+df_train <- df_polling %>% subset(Year < 2012)
+df_test <- df_polling %>% subset(Year == 2012)
+
+# BASELINE using Rasmussen
+prediction_baseline <- case_when(df_train$Rasmussen > 0 ~ 1,
+                                 df_train$Rasmussen < 0 ~ 0,
+                                 TRUE ~ -1)
+table(df_train$Republican, prediction_baseline)
+# 4 mistakes and 2 inconclusive results
+
+# BASELINE using PropR
+prediction_baseline <- ifelse(df_train$PropR >= .50, 1, 0)
+table(df_train$Republican, prediction_baseline)
+# 3 mistakes
+
+# TRAINING
+cor(df_train[,c(colnames(df_impute), "Republican")])
+# We see that ind. variables are highly correlated.
+# Select one that is most correlated with our Y
+
+model1 <- glm(Republican ~ PropR, data = df_train, family = "binomial")
+summary(model1)
+
+
+model2 <- glm(Republican ~ SurveyUSA + DiffCount, data = df_train, family = "binomial")
+summary(model2)
+```
+
+```{r}
+model <- model2
+predicted_train <- fitted.values(model, type="response")
+predicted_train <- ifelse(predicted_train >= .50, 1, 0)
+table(df_train$Republican, predicted_train)
+```
+```{r}
+predicted_test <- predict(model2, newdata = df_test)
+predicted_test <- ifelse(predicted_test >= .50, 1, 0)
+predicted_baseline <- ifelse(df_test$PropR >= .50, 1, 0)
+table(df_test$Republican, predicted_baseline)
+table(df_test$Republican, predicted_test)
+
+# For this particular case, we dont need ROCR
+# But here we just want to predict the outcome of each state, and we dont care about the false positive / false negative error.
+# So in this case, we're okay just predicting at 0.5
+
+# Check were we made the mistake
+subset(df_test, predicted_test > 0.5 & Republican == 0)
+```
+
+
+
+
+

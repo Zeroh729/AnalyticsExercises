@@ -1,0 +1,142 @@
+
+# Wine
+```{r}
+
+df_orig <- read.csv("wine.csv") 
+# AGST =  Average Growing Season Temperature 
+
+# Fit a model 1
+model1 <- lm(Price ~ AGST, data = df_orig)
+summary(model1)
+
+# calculate SSE 
+sum(model1$residuals^2)
+
+
+# Fit a model 2
+model2 <- lm(Price ~ AGST + HarvestRain, data = df_orig)
+summary(model2)
+
+# calculate SSE 
+sum(model2$residuals^2)
+
+
+# Fit a model 3
+model3 <- lm(Price ~ AGST + HarvestRain + WinterRain + Age + FrancePop, data = df_orig)
+summary(model3)
+
+# calculate SSE 
+sum(model3$residuals^2)
+
+
+# Fit a model 4
+model4 <- lm(Price ~ AGST + HarvestRain + WinterRain + Age, data = df_orig)
+summary(model4)
+
+# calculate SSE 
+sum(model4$residuals^2)
+
+
+# Fit a model 5
+model5 <- lm(Price ~ AGST + HarvestRain + WinterRain, data = df_orig)
+summary(model5)
+
+# calculate SSE 
+sum(model5$residuals^2)
+```
+
+
+# Exercise 
+```{r}
+model <- lm(Price ~ HarvestRain + WinterRain, data = df_orig)
+summary(model)
+
+SSTotal <- sum((df_orig$Price - mean(df_orig$Price))^2)
+SSRes <- sum(model$residuals^2)
+SSReg <- SSTotal - SSRes
+Rsquared <- SSReg / SSTotal
+```
+
+#  Wine - Test data
+```{r}
+df_test <- read.csv("wine_test.csv")
+
+yhat <- predict(model4, newdata = df_test)
+SSE <- sum((df_test$Price - yhat)^2)
+SST <- sum((df_test$Price - mean(df_orig$Price))^2)
+Rsquared <- 1 - SSE/SST
+Rsquared
+
+# Test Rsquared can be negative when SSE bloats up, since our model can do worse on testing
+```
+
+
+# MoneyBall
+```{r}
+library(dplyr)
+library(ggplot2)
+df_orig <- read.csv("baseball.csv")
+# RS = Runs scored
+# RA = Runs allowed
+# W = wins
+# OBP = On-Base Percentage - perc of time a player gets on base (including walks)
+# SLG = Slugging Percentage - how fare a player gets around the vases on his turn (measures of power)
+
+df_orig <- df_orig %>% mutate(RD = RS - RA)
+plot(df_orig$RD, df_orig$W)
+
+# How many wins to get to playoffs?
+ggplot(df_orig, aes(x = W, group = Playoffs, fill = Playoffs)) +
+  geom_boxplot()
+# average of 95
+
+# Is RD a predictor of W?
+model_wins <- lm(W ~ RD, data = df_orig)
+summary(model_wins)
+# Yes, and to get 95 wins, 91 RD is needed
+
+# Run Score
+model_runsscore <- lm(RS ~ OBP + SLG + BA, data = df_orig)
+summary(model_runsscore)
+
+model_runsscore2 <- lm(RS ~ OBP + SLG, data = df_orig)
+summary(model_runsscore2)
+
+# Runs Allowed
+model_runsallowed <- lm(RA ~ OOBP + OSLG, data = df_orig)
+summary(model_runsallowed)
+predict(model_runsallowed, newdata = data.frame(OOBP = 0.297 , OSLG = 0.370))
+
+lm(W ~ OBP + SLG, data = df_orig) %>% summary()
+```
+```{r}
+# Rank 1: the team that won the World Series
+# Rank 2: the team that lost the World Series
+# Rank 3: the two (x2) teams that lost to the teams in the World Series
+# Rank 4: the four (x4) teams that made it past the wild card round, but lost to the above four teams
+# Rank 5: the two (x2) teams that lost the wild card round
+
+teamRank <- c(1,2,3,3,4,4,4,4,5,5)
+df_2012 <- df_orig %>% subset(Year == 2012) %>% filter(!is.na(RankPlayoffs)) %>% arrange(RankPlayoffs)
+cor(teamRank, df_2012$W)
+```
+
+
+# NBA Data
+```{r}
+df_orig <- read.csv("NBA_train.csv")
+
+# How many games does a team need to win to make it to the playoffs?
+ggplot(df_orig, aes(x = W, fill = Playoffs, group = Playoffs)) +
+  geom_boxplot()
+
+table(df_orig$W, df_orig$Playoffs)
+
+# Can we predict W by points scored and points allowed
+df_nba <- df_orig %>% mutate(diff = PTS - oppPTS)
+plot(df_nba$diff, df_nba$W)
+
+model <- lm(W ~ diff, data = df_nba)
+summary(model)
+```
+
