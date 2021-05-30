@@ -1,7 +1,232 @@
 
 
+```{r}
+library(dplyr)
+library(magrittr)
+library(caTools)
+library(rpart)
+library(rpart.plot)
+library(ROCR)
+```
+
+
+# Supreme Court Data - Predict if case will be reversed or not
+```{r}
+df_case <- read.csv("stevens.csv")  # Judge Steven's cases
+df_case$Reverse <- as.factor(df_case$Reverse)
+str(df_case)  
+# variables
+# Docket : Case ID
+# Reverse : Dependent variable (1 = reverse; 0 = affirm)
+
+# Step 1 : Split into Training, Test data
+set.seed(3000)
+isTraining <- sample.split(df_case$Reverse, SplitRatio = 0.70)
+df_train <- df_case[isTraining,]
+df_test <- df_case[!isTraining,]
+
+modelFormula <- Reverse ~ Circuit + Issue + Petitioner + Respondent + LowerCourt + Unconst
+```
+
+
+```{r Method 1 : CART}
+# Step 1 : Build a CART model
+model_tree <- rpart(data = df_train, formula = modelFormula, method="class", minbucket = 25)
+prp(model_tree) # plot tree
+
+# Step 2 : Evaluate model
+# 1. Compare with baseline accuracy
+table(df_test$Reverse)
+baseline_accuracy <- 93/nrow(df_test) # since there are more reverses (93), then `baseline_accuracy` is the probability of getting it right when the prediction is always reverse
+
+prediction_test <- predict(model_tree, newdata = df_test, type="class")
+table(df_test$Reverse, prediction_test) # confusion matrix
+prediction_accuracy <-(41+71)/nrow(df_test)
+
+
+# 2. Compare with baseline accuracy
+prediction_test_probs <- predict(model_tree, newdata = df_test)
+rocrData <- prediction(prediction_test_probs[,2], df_test$Reverse) # Select 2nd col since it corresponds to Reverse
+rocrCurve <- performance(rocrData, "tpr", "fpr")
+rocrAUC <- performance(rocrData, "auc")@y.values[[1]]
+plot(rocrCurve, colorize = TRUE)
+```
+
+```{r Method 2 : Random Forest}
+library(randomForest)
+
+# Step 1 : Train a random forest
+set.seed(200)
+model_randomFor <- randomForest(modelFormula, data = df_train, nodesize = 25, ntree = 200)
+
+# Step 2 : Evaluate using test data
+predicted_test <- predict(model_randomFor, newdata = df_test)
+table(df_test$Reverse, predicted_test)
+(52+71)/nrow(df_test)
+```
+
+```{r Method 3 : OCT / Optimal Classification Trees}
+library(caret)
+library(e1071)
+
+# Step 1 : Optimize complexity parameter (cp) by using cross-validation 
+folds <- trainControl(method = "cv", number = 10)  # "number" is the no. of cross validation folds
+cpGrid <- expand.grid(.cp=seq(0.01, 0.5, 0.01))    # Tuning Grid : cp = 0.01 - 0.5
+set.seed(123)
+caret::train(modelFormula, data = df_train, method="rpart", trControl=folds, tuneGrid = cpGrid)
+# -- output:
+# Accuracy was used to select the optimal model using the largest value.
+# The final value used for the model was cp = 0.16
+
+# Step 2 : Train an OCT model
+optimalCP <- 0.16
+modelOct <- rpart(modelFormula, data = df_train, method = "class", cp = optimalCP)
+prp(modelOct)
+
+# Step 3 : Evaluate using test data
+predicted_test <- predict(modelOct, newdata = df_test, type="class")
+table(predicted_test, df_test$Reverse)
+(59 + 64)/nrow(df_test)
+```
+
+
+# Medicare Claims Data (Case when : Not all errors are equal; i.e. Penalty Matrix)
+Predict the pricing bucket (k=5) for 2009
+```{r}
+df_claims <- read.csv("ClaimsData.csv")
+str(df_claims)
+
+penaltyMatrix <- matrix(c(  # columns: ground truth, rows: predicted
+                        c(0,2,4,6,8),
+                        c(1,0,2,4,6),
+                        c(2,1,0,2,4),
+                        c(3,2,1,0,2),
+                        c(4,3,2,1,0)
+                        ),
+                        byrow = TRUE,
+                        nrow = 5)
+
+library(caTools)
+set.seed(88)
+isTraining <- sample.split(df_claims$bucket2009, SplitRatio = 0.6)
+df_train <- df_claims[isTraining,]
+df_test <- df_claims[!isTraining,]
+
+mean(df_train$age)
+table(df_train$diabetes)/nrow(df_train)
+```
 
 ```{r}
+# Baseline opt 1: prediction of 2009 is just to copy 2008's outcome as th predictions
+tableConfMatrix <- table(df_test$bucket2008, df_test$bucket2009)
+baseline_accuracy <- sum(diag(tableConfMatrix))/sum(tableConfMatrix)
+baseline_penalty <- sum(tableConfMatrix * penaltyMatrix)/sum(tableConfMatrix)
+c(baseline_accuracy, baseline_penalty)
 
+# Baseline opt 2: prediction of 2009 is the bucket where most people are in (bucket 1)
+tableConfMatrix <- table(rep(1, nrow(df_test)), df_test$bucket2009)
+baseline_accuracy <- sum(diag(tableConfMatrix))/sum(tableConfMatrix)
+baseline_penalty <- sum(tableConfMatrix * penaltyMatrix[1,])/sum(tableConfMatrix)
+c(baseline_accuracy, baseline_penalty)
+```
+
+```{r}
+library(rpart)
+library(rpart.plot)
+
+# Step 1 : Fit a CART model
+modelCart <- rpart(data = df_train, formula = bucket2009 ~ age + arthritis + alzheimers + cancer + copd + depression + diabetes + heart.failure + ihd + kidney + osteoporosis + stroke + bucket2008 + reimbursement2008, method="class", cp=0.00005, parms = list(loss=penaltyMatrix))
+
+# prp(modelCart)
+
+# Step 2 : Evaluation
+predicted_test <- predict(modelCart, newdata = df_test, type="class")
+confMatrix <- table(df_test$bucket2009, predicted_test)
+accuracy_test <- sum(diag(confMatrix)) / sum(confMatrix)
+penalty_test <- sum(confMatrix * penaltyMatrix) / sum(confMatrix)
+c(accuracy_test, penalty_test)
+```
+
+
+# Boston Housing - predict pricing (predictors are non-linear)
+```{r}
+df_housing.orig <- read.csv("boston.csv")
+# Each row is a Census Tract - a statistical division of area to breakdown towns and cities
+# A Tract contains:
+#  LON and LAT - center of the tract
+#  MEDV        - median house value in $ thousands
+#  CRIM        - crime rate 
+#  ZN          - percentage of how much land is zoned for residential properties
+#  INDUS       - percentage of area used for industry
+#  CHAS        - 1 if right next to the Charles River
+#  NOX         - concentration of nitrous oxides in the air
+#  RM          - average number of rooms per dwelling
+#  AGE         - percentage of units built before 1940
+#  DIS         - distance to Boston's employment centers
+#  RAD         - closeness to important highways
+#  TAX         - property tax rate per $10,000 of value
+#  PTRATIO     - pupil-teacher ratio by town
+
+plot(df_housing.orig$LON, df_housing.orig$LAT)
+points(df_housing.orig$LON[df_housing.orig$CHAS==1], df_housing.orig$LAT[df_housing.orig$CHAS==1], col="blue", pch=19)
+points(df_housing.orig$LON[df_housing.orig$TRACT==3531], df_housing.orig$LAT[df_housing.orig$TRACT==3531], col="red", pch=19)
+points(df_housing.orig$LON[df_housing.orig$NOX>=.55], df_housing.orig$LAT[df_housing.orig$NOX>=.55], col="green", pch=19)
+points(df_housing.orig$LON[df_housing.orig$MEDV>=21.2], df_housing.orig$LAT[df_housing.orig$MEDV>=21.2], col="blue", pch="$")
+
+plot(df_housing.orig$LAT, df_housing.orig$MEDV) # doesn't look linear
+plot(df_housing.orig$LON, df_housing.orig$MEDV) # doesn't look linear
+
+model1 <- lm(MEDV ~ LON, data = df_housing)
+summary(model1) # LON is significant but it doesnt make sense as based on the plot(LON, MEDV)
+
+
+set.seed(123)
+isTrain <- sample.split(df_housing.orig$MEDV, SplitRatio = 0.7)
+df_train <- df_housing.orig[isTrain,]
+df_test <- df_housing.orig[!isTrain,]
+```
+
+
+```{r}
+# Method 1 : Try a linear regression anyway
+model1 <- lm(MEDV ~ LAT + LON + CRIM + ZN + INDUS + CHAS + NOX + RM + AGE + DIS + RAD + TAX + PTRATIO, data = df_train)
+summary(model1)
+
+predicted_test1 <- predict(model1, newdata = df_test)
+SSE_test1 <- sum((df_test$MEDV - predicted_test1)^2)
+RMSE_test1 <- sqrt(SSE_test1/nrow(df_test))
+```
+
+```{r}
+# Method 2 : Try CART
+model2 <- rpart(MEDV ~ LAT + LON + CRIM + ZN + INDUS + CHAS + NOX + RM + AGE + DIS + RAD + TAX + PTRATIO, minbucket = 50, data = df_train)
+prp(model2)
+
+predicted_test2 <- predict(model2, newdata = df_test)
+SSE_test2 <- sum((df_test$MEDV - predicted_test2)^2)
+RMSE_test2 <- sqrt(SSE_test2/nrow(df_test)) # Verdict : Did not improve linear regression
+```
+```{r}
+# Method 3 : Try OCT (basically CART with cp parameter)
+library(caret)
+library(e1071)
+
+# Step 1 : Optimize complexity parameter (cp) by using cross-validation 
+folds <- trainControl(method = "cv", number = 10)  # "number" is the no. of cross validation folds
+cpGrid <- expand.grid(.cp=(0:10)*0.001)    # Tuning Grid : cp = 0 - 0.01
+set.seed(123)
+list_models <- caret::train(MEDV ~ LAT + LON + CRIM + ZN + INDUS + CHAS + NOX + RM + AGE + DIS + RAD + TAX + PTRATIO, 
+             data = df_train, method="rpart", trControl=folds, tuneGrid = cpGrid)
+list_models
+# -- output:
+# RMSE was used to select the optimal model using the smallest value.
+# The final value used for the model was cp = 0.01.
+
+# Step 2 : Get the best model
+model3 <- list_models$finalModel
+prp(model3)
+predicted_test3 <- predict(model3, newdata = df_test)
+SSE_test3 <- sum((df_test$MEDV - predicted_test3)^2)
+RMSE_test3 <- sqrt(SSE_test3/nrow(df_test))
 ```
 

@@ -1,0 +1,35 @@
+
+```{r}
+df_movies.orig <- read.delim("u.item.txt", header=FALSE, sep = "|")
+df_movies <- df_movies.orig
+str(df_movies)
+colnames(df_movies) <- c("ID", "Title", "ReleaseDate", "VideoReleaseDate", "IMDB", "GenreUnknown", "GenreAction", "GenreAdventure", "GenreAnimation", "GenreChildrens", "GenreComedy", "GenreCrime", "GenreDocumentary", "GenreDrama", "GenreFantasy", "GenreFilNoir", "GenreHorror", "GenreMusical", "GenreMystery", "GenreRomance", "GenreSciFi", "GenreThriller", "GenreWar", "GenreWestern")
+
+df_movies <- df_movies[,!colnames(df_movies) %in% c("ID", "ReleaseDate", "VideoReleaseDate", "IMDB")]
+df_movies <- unique(df_movies)
+```
+
+```{r}
+# Step 1 : Compute Distances
+distMatrix <- dist(df_movies[2:20], method="euclidean")
+
+# Step 2 : Perform clustering
+cluster <- hclust(distMatrix, method="ward")
+plot(cluster)
+
+# Step 3 : Select k - number of clusters, and then set the cluster label for each obs
+clusterLabels <- cutree(clusterMovies, k = 10)
+
+# Explore Results
+#   Within cluster - Compute the percentage of Action movies within cluster 
+tapply(df_movies$GenreAction, clusterLabels, mean)
+```
+
+```{r}
+# Let's see what movies are similar to "Men In Black", i.e. movie id 257
+subset(df_movies, Title == "Men in Black (1997)")
+
+# "Men in Black" is in cluster 2
+cluster2 <- subset(df_movies, clusterLabels == clusterLabels[257])
+```
+
