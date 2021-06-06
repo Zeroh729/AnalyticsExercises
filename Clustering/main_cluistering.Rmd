@@ -1,4 +1,4 @@
-
+# IMDB Dataset
 ```{r}
 df_movies.orig <- read.delim("u.item.txt", header=FALSE, sep = "|")
 df_movies <- df_movies.orig
@@ -10,6 +10,7 @@ df_movies <- unique(df_movies)
 ```
 
 ```{r}
+# Problem :  "Which movies should we suggest to people who like Men in Black?"
 # Step 1 : Compute Distances
 distMatrix <- dist(df_movies[2:20], method="euclidean")
 
@@ -32,4 +33,73 @@ subset(df_movies, Title == "Men in Black (1997)")
 # "Men in Black" is in cluster 2
 cluster2 <- subset(df_movies, clusterLabels == clusterLabels[257])
 ```
+
+
+# Image clustering - Flower
+```{r}
+image_flower <- read.csv("flower.csv", header = FALSE)
+matrix_imgFlower <- as.matrix(image_flower)
+vector_imgFlower <- as.vector(matrix_imgFlower)
+matrix_distance <- dist(vector_imgFlower, method = "euclidean")
+
+# Step 1 : Perform Hierarchical Clustering
+hclusters <- hclust(matrix_distance, method = "ward")
+
+# Step 2 : View dendrogram to select k
+plot(hclusters); rect.hclust(hclusters, k = 3, border = "red")
+
+# Step 3 : Split dendrogram to k clusters
+vector_clustMem <- cutree(hclusters, k = 3)
+tapply(vector_imgFlower, vector_clustMem, mean) # we can see that cluster 1 is lighter; cluster 3 is darker
+
+# View image
+matrix_clustMem <- matrix(vector_clustMem, ncol = 50)
+image(matrix_clustMem)
+image(matrix_imgFlower, col = grey(seq(0,1, length = 256)))
+```
+
+
+
+# Image clustering - Brain MRI
+```{r}
+# Training Set - Healthy Brain
+df_brain <- read.csv("healthy.csv", header = FALSE)
+matrix_brain <- as.matrix(df_brain)
+vector_brain <- as.vector(matrix_brain)
+image(matrix_brain, axes=FALSE, col = grey(seq(0,1,length=256)))
+
+# Method 1 : Hierarchical Clustering
+matrix_distance <- dist(vector_brain, method = "euclidean")
+# ERROR: cannot allocate vector of size 498.0 Gb (bcuz image is hi-red)
+#    since a distance matrix can't be calculated. Use a different clustering approach
+
+
+# Method 2 : K-Means
+k <- 5   # 5 is chosen for the sake of example
+clusters <- kmeans(vector_brain, centers = k, iter.max = 1000)
+str(clusters)
+matrix_clustMem <- matrix(clusters$cluster, ncol = ncol(df_brain))
+image(matrix_clustMem, axes = FALSE, col = heat.colors(k, rev = TRUE))
+
+```
+
+
+```{r}
+# Testing Set - Brain with Tumor
+df_brainTumor <- read.csv("tumor.csv", header=FALSE)
+matrix_brainTumor <- as.matrix(df_brainTumor)
+vector_brainTumor <- as.vector(matrix_brainTumor)
+image(matrix_brainTumor, axes=FALSE, col = grey(seq(0,1,length=256)))
+
+library(flexclust)
+
+# Convert resulting cluster object to a KCCA object
+kcca <- as.kcca(clusters, vector_brain)
+predicted_clusters <- predict(kcca, newdata = vector_brainTumor)
+predicted_clusters <- matrix(predicted_clusters, ncol = ncol(matrix_brainTumor))
+
+image(predicted_clusters, axes = FALSE, col = heat.colors(k, rev = TRUE))
+```
+
+
 
